@@ -1,0 +1,13 @@
+# Go
+*.exe
+*.out
+*.test
+vendor/
+
+# Editor junk
+.DS_Store
+.idea/
+.vscode/
+
+# Build
+bin/

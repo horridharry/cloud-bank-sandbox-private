@@ -1,0 +1,35 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:15
+    container_name: accounts-db
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: accounts
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  accounts-service:
+    build:
+      context: ./services/accounts
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+    environment:
+      DB_URL: postgres://postgres:postgres@db:5432/accounts?sslmode=disable
+
+  transactions-service:
+    build:
+      context: ./services/transactions
+    ports:
+      - "8081:8081"
+    depends_on:
+      - accounts-service
+
+volumes:
+  pgdata:

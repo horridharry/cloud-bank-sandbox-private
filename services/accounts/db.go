@@ -1,10 +1,30 @@
 package main
 
 import (
-    "sync"
+	"database/sql"
+	"fmt"
+	"os"
+
+	_ "github.com/lib/pq"
 )
 
-var (
-    accounts = make(map[string]Account)
-    mu       = sync.Mutex{}
-)
+var db *sql.DB
+
+func InitDB() error {
+	connStr := os.Getenv("DB_URL")
+	if connStr == "" {
+		connStr = "postgres://postgres:postgres@localhost:5432/accounts?sslmode=disable"
+	}
+
+	var err error
+	db, err = sql.Open("postgres", connStr)
+	if err != nil {
+		return fmt.Errorf("sql.Open failed: %w", err)
+	}
+
+	if err = db.Ping(); err != nil {
+		return fmt.Errorf("db.Ping failed: %w", err)
+	}
+
+	return nil
+}
