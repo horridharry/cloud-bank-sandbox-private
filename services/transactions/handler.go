@@ -2,74 +2,111 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
+	"log"
 	"net/http"
-	"strings"
 
 	"github.com/google/uuid"
 )
 
-var transactions []Transaction // In-memory for now
-
 func CreateTransaction(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		From string  `json:"from_account_id"`
-		To   string  `json:"to_account_id"`
-		Amt  float64 `json:"amount"`
+		FromAccountID string  `json:"from_account_id"`
+		ToAccountID   string  `json:"to_account_id"`
+		Amount        float64 `json:"amount"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
+		log.Println("DB insert failed:", err)
+		http.Error(w, "Invalid input", http.StatusBadRequest)
 		return
 	}
 
-	txn := Transaction{
-		ID:            uuid.New().String(),
-		FromAccountID: input.From,
-		ToAccountID:   input.To,
-		Amount:        input.Amt,
+	txID := uuid.New().String()
+
+	tx, err := db.Begin()
+	if err != nil {
+		log.Println("DB insert failed:", err)
+		http.Error(w, "Failed to begin transaction", http.StatusInternalServerError)
+		return
 	}
 
-	transactions = append(transactions, txn)
+	// Deduct from sender
+	_, err = tx.Exec(
+		"UPDATE accounts SET balance = balance - $1 WHERE id = $2 AND balance >= $1",
+		input.Amount, input.FromAccountID,
+	)
+	if err != nil {
+		tx.Rollback()
+		log.Println("DB insert failed:", err)
+		http.Error(w, "Failed to deduct balance", http.StatusBadRequest)
+		return
+	}
+
+	// Credit to receiver
+	_, err = tx.Exec(
+		"UPDATE accounts SET balance = balance + $1 WHERE id = $2",
+		input.Amount, input.ToAccountID,
+	)
+	if err != nil {
+		tx.Rollback()
+		log.Println("DB insert failed:", err)
+		http.Error(w, "Failed to credit balance", http.StatusBadRequest)
+		return
+	}
+
+	// Insert transaction
+	_, err = tx.Exec(
+		"INSERT INTO transactions (id, from_account_id, to_account_id, amount) VALUES ($1, $2, $3, $4)",
+		txID, input.FromAccountID, input.ToAccountID, input.Amount,
+	)
+	if err != nil {
+		tx.Rollback()
+		log.Println("DB insert failed:", err)
+		http.Error(w, "Failed to save transaction", http.StatusInternalServerError)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Println("DB insert failed:", err)
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	t := Transaction{
+		ID:            txID,
+		FromAccountID: input.FromAccountID,
+		ToAccountID:   input.ToAccountID,
+		Amount:        input.Amount,
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(txn)
+	json.NewEncoder(w).Encode(t)
 
-	if !accountExists(input.From) || !accountExists(input.To) {
-		http.Error(w, "One or both accounts do not exist", http.StatusBadRequest)
-		// Debit sender
-		http.Post("http://accounts-service:8080/accounts/update-balance", "application/json",
-			strings.NewReader(fmt.Sprintf(`{"account_id":"%s", "amount":%f}`, input.From, -input.Amt)))
+	log.Printf("Transaction request: %+v", input)
 
-		// Credit receiver
-		http.Post("http://accounts-service:8080/accounts/update-balance", "application/json",
-			strings.NewReader(fmt.Sprintf(`{"account_id":"%s", "amount":%f}`, input.To, input.Amt)))
-
-		return
-	}
 }
 
 func ListTransactions(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(transactions)
-}
-
-func accountExists(accountID string) bool {
-	resp, err := http.Get("http://accounts-service:8080/accounts")
+	rows, err := db.Query("SELECT id, from_account_id, to_account_id, amount FROM transactions")
 	if err != nil {
-		return false
+		http.Error(w, "Failed to read transactions", http.StatusInternalServerError)
+		return
 	}
-	defer resp.Body.Close()
+	defer rows.Close()
 
-	var accounts []Account
-	if err := json.NewDecoder(resp.Body).Decode(&accounts); err != nil {
-		return false
-	}
-
-	for _, acc := range accounts {
-		if acc.ID == accountID {
-			return true
+	var list []Transaction
+	for rows.Next() {
+		var t Transaction
+		if err := rows.Scan(&t.ID, &t.FromAccountID, &t.ToAccountID, &t.Amount); err == nil {
+			list = append(list, t)
 		}
 	}
-	return false
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(list)
+}
+
+func Healthz(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("ok"))
 }

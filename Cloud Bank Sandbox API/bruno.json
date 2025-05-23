@@ -1,0 +1,9 @@
+{
+  "version": "1",
+  "name": "Cloud Bank Sandbox API",
+  "type": "collection",
+  "ignore": [
+    "node_modules",
+    ".git"
+  ]
+}

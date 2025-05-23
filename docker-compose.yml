@@ -12,6 +12,11 @@ services:
       POSTGRES_DB: accounts
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
 
   accounts-service:
     build:
@@ -19,7 +24,8 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     environment:
       DB_URL: postgres://postgres:postgres@db:5432/accounts?sslmode=disable
 
@@ -29,7 +35,10 @@ services:
     ports:
       - "8081:8081"
     depends_on:
-      - accounts-service
+      accounts-service:
+        condition: service_started
+    environment:
+      DB_URL: postgres://postgres:postgres@db:5432/accounts?sslmode=disable
 
 volumes:
   pgdata:

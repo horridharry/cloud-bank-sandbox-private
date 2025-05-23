@@ -13,7 +13,7 @@ var db *sql.DB
 func InitDB() error {
 	connStr := os.Getenv("DB_URL")
 	if connStr == "" {
-		connStr = "postgres://postgres:postgres@accounts-db:5432/accounts?sslmode=disable"
+		connStr = "postgres://postgres:postgres@accounts-db:5432/transactions?sslmode=disable"
 	}
 
 	var err error
